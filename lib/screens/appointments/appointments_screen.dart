@@ -13,12 +13,230 @@ class AppointmentsScreen extends StatefulWidget {
 
 class _AppointmentsScreenState extends State<AppointmentsScreen> {
   List<Map<String, dynamic>> _appointments = [];
+
   bool _loading = true;
+  bool _planLoading = true;
+  bool _isPaidPlan = false;
+  bool _automaticReminders = false;
 
   @override
   void initState() {
     super.initState();
     _loadAppointments();
+    _loadPlan();
+  }
+
+  Future<void> _loadPlan() async {
+    final user = SupabaseService.client.auth.currentUser;
+
+    if (user == null) {
+      if (mounted) {
+        setState(() {
+          _planLoading = false;
+        });
+      }
+      return;
+    }
+
+    try {
+      final data = await SupabaseService.client
+          .from('user_plans')
+          .select('plan, automatic_reminders')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      if (data == null) {
+        await SupabaseService.client.from('user_plans').insert({
+          'user_id': user.id,
+          'plan': 'free',
+          'automatic_reminders': false,
+        });
+
+        setState(() {
+          _isPaidPlan = false;
+          _automaticReminders = false;
+          _planLoading = false;
+        });
+
+        return;
+      }
+
+      setState(() {
+        _isPaidPlan = data['plan']?.toString() == 'paid';
+        _automaticReminders = data['automatic_reminders'] == true;
+        _planLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      setState(() {
+        _planLoading = false;
+        _isPaidPlan = false;
+        _automaticReminders = false;
+      });
+
+      debugPrint('Erro ao carregar plano: $error');
+    }
+  }
+
+  Future<void> _toggleAutomaticReminders(bool value) async {
+    final user = SupabaseService.client.auth.currentUser;
+
+    if (user == null) return;
+
+    if (!_isPaidPlan) {
+      _showPaidPlanDialog();
+      return;
+    }
+
+    try {
+      await SupabaseService.client
+          .from('user_plans')
+          .update({
+            'automatic_reminders': value,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('user_id', user.id);
+
+      if (!mounted) return;
+
+      setState(() {
+        _automaticReminders = value;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            value
+                ? 'Lembretes automáticos ativados.'
+                : 'Lembretes automáticos desativados.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Não foi possível alterar a configuração.'),
+        ),
+      );
+
+      debugPrint('Erro ao alterar lembretes automáticos: $error');
+    }
+  }
+
+  Future<void> _openReminderSettings() async {
+    if (_planLoading) {
+      return;
+    }
+
+    if (!_isPaidPlan) {
+      _showPaidPlanDialog();
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.notifications_active_outlined),
+                  SizedBox(width: 10),
+                  Expanded(child: Text('Lembretes automáticos')),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Envie automaticamente um lembrete pelo WhatsApp um dia antes do atendimento.',
+                  ),
+                  const SizedBox(height: 20),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Ativar lembretes'),
+                    subtitle: Text(
+                      _automaticReminders ? 'Ativado' : 'Desativado',
+                    ),
+                    value: _automaticReminders,
+                    onChanged: (value) async {
+                      setDialogState(() {
+                        _automaticReminders = value;
+                      });
+
+                      await _toggleAutomaticReminders(value);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.workspace_premium_outlined, size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Seu plano pago permite utilizar os lembretes automáticos.',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Fechar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showPaidPlanDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.workspace_premium_outlined),
+              SizedBox(width: 10),
+              Expanded(child: Text('Recurso do plano pago')),
+            ],
+          ),
+          content: const Text(
+            'Os lembretes automáticos pelo WhatsApp estão disponíveis somente para usuários do plano pago.\n\nNo plano gratuito, você continua podendo enviar os lembretes manualmente.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('Fechar'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _loadAppointments() async {
@@ -209,11 +427,11 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   Future<void> _openWhatsApp(Map<String, dynamic> appointment) async {
     final client = appointment['clients'] as Map<String, dynamic>?;
 
-    final service = appointment['services'] as Map<String, dynamic>?;
-
     final clientName = client?['name']?.toString() ?? 'Cliente';
 
     final phone = client?['phone']?.toString().trim() ?? '';
+
+    final service = appointment['services'] as Map<String, dynamic>?;
 
     final serviceName = service?['name']?.toString() ?? 'atendimento';
 
@@ -233,15 +451,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       return;
     }
 
-    // Remove espaços, parênteses, traços e outros caracteres.
     String cleanPhone = phone.replaceAll(RegExp(r'[^0-9]'), '');
 
-    // Remove zero inicial caso exista.
     if (cleanPhone.startsWith('0')) {
       cleanPhone = cleanPhone.substring(1);
     }
 
-    // Adiciona o código do Brasil.
     if (!cleanPhone.startsWith('55')) {
       cleanPhone = '55$cleanPhone';
     }
@@ -251,17 +466,15 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final formattedTime = time.isNotEmpty ? _formatTime(time) : '';
 
     final message =
-        'Olá, $clientName! 👋\n\n'
+        'Olá, $clientName!\n\n'
         'Passando para lembrar do seu atendimento.\n\n'
         'Data: $formattedDate\n'
         'Horário: $formattedTime\n'
         'Serviço: $serviceName\n\n'
-        'Até lá! 😊';
+        'Até lá!';
 
     final encodedMessage = Uri.encodeComponent(message);
 
-    // IMPORTANTE:
-    // Esta é a URL correta do WhatsApp.
     final whatsappUri = Uri.parse(
       'https://wa.me/$cleanPhone?text=$encodedMessage',
     );
@@ -291,7 +504,20 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Agenda')),
+      appBar: AppBar(
+        title: const Text('Agenda'),
+        actions: [
+          IconButton(
+            onPressed: _planLoading ? null : _openReminderSettings,
+            icon: Icon(
+              _automaticReminders
+                  ? Icons.notifications_active
+                  : Icons.notifications_none,
+            ),
+            tooltip: 'Lembretes automáticos',
+          ),
+        ],
+      ),
       body: RefreshIndicator(
         onRefresh: _loadAppointments,
         child: Padding(
@@ -303,16 +529,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 'Minha agenda',
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
               ),
-
               const SizedBox(height: 8),
-
               Text(
                 'Seus próximos atendimentos',
                 style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
               ),
-
               const SizedBox(height: 24),
-
               Expanded(
                 child: _loading
                     ? const Center(child: CircularProgressIndicator())
@@ -323,9 +545,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                         itemCount: _appointments.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 12),
                         itemBuilder: (context, index) {
-                          final appointment = _appointments[index];
-
-                          return _buildAppointmentCard(appointment);
+                          return _buildAppointmentCard(_appointments[index]);
                         },
                       ),
               ),
@@ -333,7 +553,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
           ),
         ),
       ),
-
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () async {
           await Navigator.push(
@@ -378,9 +597,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const CircleAvatar(child: Icon(Icons.person)),
-
                 const SizedBox(width: 12),
-
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -392,9 +609,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-
                       const SizedBox(height: 4),
-
                       Text(
                         serviceName,
                         style: TextStyle(color: Colors.grey.shade600),
@@ -402,7 +617,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     ],
                   ),
                 ),
-
                 Text(
                   _formatValue(value),
                   style: const TextStyle(
@@ -410,7 +624,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-
                 PopupMenuButton<String>(
                   onSelected: (value) {
                     if (value == 'edit') {
@@ -448,41 +661,29 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 ),
               ],
             ),
-
             const Divider(height: 24),
-
             Row(
               children: [
                 const Icon(Icons.calendar_today, size: 18),
-
                 const SizedBox(width: 8),
-
                 Text(
                   _dateTitle(date),
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
-
                 const SizedBox(width: 20),
-
                 const Icon(Icons.access_time, size: 18),
-
                 const SizedBox(width: 8),
-
                 Text(_formatTime(time)),
               ],
             ),
-
             if (appointment['notes']?.toString().isNotEmpty == true) ...[
               const SizedBox(height: 12),
-
               Text(
                 appointment['notes'].toString(),
                 style: TextStyle(color: Colors.grey.shade700),
               ),
             ],
-
             const SizedBox(height: 16),
-
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -509,16 +710,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(Icons.calendar_today, size: 72, color: Colors.grey.shade400),
-
           const SizedBox(height: 16),
-
           Text(
             'Nenhum atendimento cadastrado',
             style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
           ),
-
           const SizedBox(height: 8),
-
           Text(
             'Adicione seu primeiro atendimento.',
             style: TextStyle(color: Colors.grey.shade500),
