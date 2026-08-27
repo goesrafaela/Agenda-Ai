@@ -12,6 +12,8 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   bool _loading = true;
 
+  String _userName = '';
+
   int _todayAppointments = 0;
   double _todayReceived = 0;
   double _todayPending = 0;
@@ -51,29 +53,50 @@ class _DashboardScreenState extends State<DashboardScreen> {
           '${now.month.toString().padLeft(2, '0')}-'
           '${now.day.toString().padLeft(2, '0')}';
 
-      // =========================
+      // ============================================================
+      // PERFIL DO USUÁRIO
+      // ============================================================
+
+      String userName = '';
+
+      try {
+        final profile = await SupabaseService.client
+            .from('profiles')
+            .select('name')
+            .eq('id', user.id)
+            .maybeSingle();
+
+        userName = profile?['name']?.toString().trim() ?? '';
+      } catch (error) {
+        debugPrint('Erro ao carregar perfil: $error');
+      }
+
+      // Se o nome não estiver cadastrado, usamos o email.
+      if (userName.isEmpty) {
+        userName = user.email?.split('@').first ?? 'Usuário';
+      }
+
+      // ============================================================
       // CLIENTES
-      // =========================
+      // ============================================================
 
       final clientsData = await SupabaseService.client
           .from('clients')
           .select('id')
           .eq('user_id', user.id);
 
-      // =========================
+      // ============================================================
       // SERVIÇOS
-      // =========================
+      // ============================================================
 
       final servicesData = await SupabaseService.client
           .from('services')
           .select('id')
           .eq('user_id', user.id);
 
-      // =========================
-      // TODOS OS ATENDIMENTOS
-      // IMPORTANTE:
-      // usamos "status", igual à Agenda
-      // =========================
+      // ============================================================
+      // ATENDIMENTOS
+      // ============================================================
 
       final appointmentsData = await SupabaseService.client
           .from('appointments')
@@ -104,9 +127,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
       final upcoming = <Map<String, dynamic>>[];
 
-      // =========================
-      // CALCULAR FINANCEIRO
-      // =========================
+      // ============================================================
+      // CALCULAR FINANCEIRO E PRÓXIMOS ATENDIMENTOS
+      // ============================================================
 
       for (final item in appointmentsData) {
         final appointment = Map<String, dynamic>.from(item);
@@ -118,9 +141,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         final date = appointment['appointment_date']?.toString() ?? '';
 
-        // -------------------------
+        // ----------------------------------------------------------
         // TOTAL GERAL
-        // -------------------------
+        // ----------------------------------------------------------
 
         if (status == 'paid') {
           totalReceived += value;
@@ -128,9 +151,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           totalPending += value;
         }
 
-        // -------------------------
+        // ----------------------------------------------------------
         // ATENDIMENTOS DE HOJE
-        // -------------------------
+        // ----------------------------------------------------------
 
         if (date == today) {
           todayAppointments++;
@@ -142,9 +165,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
         }
 
-        // -------------------------
+        // ----------------------------------------------------------
         // PRÓXIMOS ATENDIMENTOS
-        // -------------------------
+        // ----------------------------------------------------------
 
         if (date.compareTo(today) >= 0 && upcoming.length < 5) {
           upcoming.add(appointment);
@@ -154,6 +177,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (!mounted) return;
 
       setState(() {
+        _userName = userName;
+
         _totalClients = clientsData.length;
         _totalServices = servicesData.length;
 
@@ -208,14 +233,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final hour = DateTime.now().hour;
 
     if (hour < 12) {
-      return 'Bom dia! 👋';
+      return 'Bom dia!';
     }
 
     if (hour < 18) {
-      return 'Boa tarde! 👋';
+      return 'Boa tarde!';
     }
 
-    return 'Boa noite! 👋';
+    return 'Boa noite!';
   }
 
   String _statusLabel(String status) {
@@ -268,8 +293,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (user == null) return;
 
-    final oldStatus = appointment['status']?.toString() ?? 'pending';
-
     try {
       await SupabaseService.client
           .from('appointments')
@@ -285,7 +308,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
       );
 
-      // Recarrega TODOS os valores do dashboard
       await _loadDashboard();
     } catch (error) {
       if (!mounted) return;
@@ -375,7 +397,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Agenda Autônomos'),
+        title: const Text('Agenda- AI'),
         actions: [
           IconButton(
             onPressed: _loading ? null : _loadDashboard,
@@ -392,8 +414,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.all(16),
                 children: [
+                  // ==================================================
+                  // SAUDAÇÃO
+                  // ==================================================
+
                   Text(
-                    _greeting(),
+                    '${_greeting()} ${_userName.isNotEmpty ? _userName : 'Usuário'} 👋',
                     style: const TextStyle(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
@@ -409,9 +435,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                   const SizedBox(height: 24),
 
-                  // =========================
+                  // ==================================================
                   // HOJE
-                  // =========================
+                  // ==================================================
                   Row(
                     children: [
                       Expanded(
@@ -421,9 +447,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           icone: Icons.calendar_today,
                         ),
                       ),
-
                       const SizedBox(width: 12),
-
                       Expanded(
                         child: _ResumoCard(
                           titulo: 'A receber hoje',
@@ -436,9 +460,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                   const SizedBox(height: 12),
 
-                  // =========================
-                  // RECEBIDO HOJE
-                  // =========================
+                  // ==================================================
+                  // RECEBIDO HOJE / CLIENTES
+                  // ==================================================
                   Row(
                     children: [
                       Expanded(
@@ -448,9 +472,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           icone: Icons.check_circle_outline,
                         ),
                       ),
-
                       const SizedBox(width: 12),
-
                       Expanded(
                         child: _ResumoCard(
                           titulo: 'Clientes',
@@ -463,9 +485,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                   const SizedBox(height: 12),
 
-                  // =========================
-                  // FINANCEIRO GERAL
-                  // =========================
+                  // ==================================================
+                  // FINANCEIRO
+                  // ==================================================
                   _ResumoCard(
                     titulo: 'Total a receber',
                     valor: _formatValue(_totalPending),
@@ -490,9 +512,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                   const SizedBox(height: 32),
 
-                  // =========================
+                  // ==================================================
                   // PRÓXIMOS ATENDIMENTOS
-                  // =========================
+                  // ==================================================
                   const Text(
                     'Próximos atendimentos',
                     style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
@@ -574,7 +596,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
             const SizedBox(height: 12),
 
-            // STATUS
             _buildStatusButton(appointment),
 
             const Divider(height: 24),

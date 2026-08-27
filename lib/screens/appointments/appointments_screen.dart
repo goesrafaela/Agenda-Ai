@@ -13,230 +13,15 @@ class AppointmentsScreen extends StatefulWidget {
 
 class _AppointmentsScreenState extends State<AppointmentsScreen> {
   List<Map<String, dynamic>> _appointments = [];
-
   bool _loading = true;
-  bool _planLoading = true;
-  bool _isPaidPlan = false;
-  bool _automaticReminders = false;
+
+  String _searchText = '';
+  String _statusFilter = 'all';
 
   @override
   void initState() {
     super.initState();
     _loadAppointments();
-    _loadPlan();
-  }
-
-  Future<void> _loadPlan() async {
-    final user = SupabaseService.client.auth.currentUser;
-
-    if (user == null) {
-      if (mounted) {
-        setState(() {
-          _planLoading = false;
-        });
-      }
-      return;
-    }
-
-    try {
-      final data = await SupabaseService.client
-          .from('user_plans')
-          .select('plan, automatic_reminders')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-      if (!mounted) return;
-
-      if (data == null) {
-        await SupabaseService.client.from('user_plans').insert({
-          'user_id': user.id,
-          'plan': 'free',
-          'automatic_reminders': false,
-        });
-
-        setState(() {
-          _isPaidPlan = false;
-          _automaticReminders = false;
-          _planLoading = false;
-        });
-
-        return;
-      }
-
-      setState(() {
-        _isPaidPlan = data['plan']?.toString() == 'paid';
-        _automaticReminders = data['automatic_reminders'] == true;
-        _planLoading = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-
-      setState(() {
-        _planLoading = false;
-        _isPaidPlan = false;
-        _automaticReminders = false;
-      });
-
-      debugPrint('Erro ao carregar plano: $error');
-    }
-  }
-
-  Future<void> _toggleAutomaticReminders(bool value) async {
-    final user = SupabaseService.client.auth.currentUser;
-
-    if (user == null) return;
-
-    if (!_isPaidPlan) {
-      _showPaidPlanDialog();
-      return;
-    }
-
-    try {
-      await SupabaseService.client
-          .from('user_plans')
-          .update({
-            'automatic_reminders': value,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('user_id', user.id);
-
-      if (!mounted) return;
-
-      setState(() {
-        _automaticReminders = value;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            value
-                ? 'Lembretes automáticos ativados.'
-                : 'Lembretes automáticos desativados.',
-          ),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Não foi possível alterar a configuração.'),
-        ),
-      );
-
-      debugPrint('Erro ao alterar lembretes automáticos: $error');
-    }
-  }
-
-  Future<void> _openReminderSettings() async {
-    if (_planLoading) {
-      return;
-    }
-
-    if (!_isPaidPlan) {
-      _showPaidPlanDialog();
-      return;
-    }
-
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Row(
-                children: [
-                  Icon(Icons.notifications_active_outlined),
-                  SizedBox(width: 10),
-                  Expanded(child: Text('Lembretes automáticos')),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Envie automaticamente um lembrete pelo WhatsApp um dia antes do atendimento.',
-                  ),
-                  const SizedBox(height: 20),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Ativar lembretes'),
-                    subtitle: Text(
-                      _automaticReminders ? 'Ativado' : 'Desativado',
-                    ),
-                    value: _automaticReminders,
-                    onChanged: (value) async {
-                      setDialogState(() {
-                        _automaticReminders = value;
-                      });
-
-                      await _toggleAutomaticReminders(value);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.workspace_premium_outlined, size: 20),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Seu plano pago permite utilizar os lembretes automáticos.',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                  },
-                  child: const Text('Fechar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _showPaidPlanDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.workspace_premium_outlined),
-              SizedBox(width: 10),
-              Expanded(child: Text('Recurso do plano pago')),
-            ],
-          ),
-          content: const Text(
-            'Os lembretes automáticos pelo WhatsApp estão disponíveis somente para usuários do plano pago.\n\nNo plano gratuito, você continua podendo enviar os lembretes manualmente.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: const Text('Fechar'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   Future<void> _loadAppointments() async {
@@ -297,6 +82,31 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
       debugPrint('Erro ao carregar atendimentos: $error');
     }
+  }
+
+  List<Map<String, dynamic>> get _filteredAppointments {
+    return _appointments.where((appointment) {
+      final client = appointment['clients'] as Map<String, dynamic>?;
+
+      final service = appointment['services'] as Map<String, dynamic>?;
+
+      final clientName = client?['name']?.toString().toLowerCase() ?? '';
+
+      final serviceName = service?['name']?.toString().toLowerCase() ?? '';
+
+      final search = _searchText.trim().toLowerCase();
+
+      final matchesSearch =
+          search.isEmpty ||
+          clientName.contains(search) ||
+          serviceName.contains(search);
+
+      final status = appointment['status']?.toString() ?? 'pending';
+
+      final matchesStatus = _statusFilter == 'all' || status == _statusFilter;
+
+      return matchesSearch && matchesStatus;
+    }).toList();
   }
 
   String _formatDate(String date) {
@@ -466,12 +276,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final formattedTime = time.isNotEmpty ? _formatTime(time) : '';
 
     final message =
-        'Olá, $clientName!\n\n'
+        'Olá, $clientName! 👋\n\n'
         'Passando para lembrar do seu atendimento.\n\n'
-        'Data: $formattedDate\n'
-        'Horário: $formattedTime\n'
-        'Serviço: $serviceName\n\n'
-        'Até lá!';
+        '📅 Data: $formattedDate\n'
+        '🕐 Horário: $formattedTime\n'
+        '✂️ Serviço: $serviceName\n\n'
+        'Até lá! 😊';
 
     final encodedMessage = Uri.encodeComponent(message);
 
@@ -501,72 +311,81 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Agenda'),
-        actions: [
-          IconButton(
-            onPressed: _planLoading ? null : _openReminderSettings,
-            icon: Icon(
-              _automaticReminders
-                  ? Icons.notifications_active
-                  : Icons.notifications_none,
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'paid':
+        return Colors.green;
+      case 'cancelled':
+        return Colors.red;
+      case 'pending':
+      default:
+        return Colors.orange;
+    }
+  }
+
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'paid':
+        return 'Recebido';
+      case 'cancelled':
+        return 'Cancelado';
+      case 'pending':
+      default:
+        return 'Pendente';
+    }
+  }
+
+  IconData _statusIcon(String status) {
+    switch (status) {
+      case 'paid':
+        return Icons.check_circle_outline;
+      case 'cancelled':
+        return Icons.cancel_outlined;
+      case 'pending':
+      default:
+        return Icons.schedule;
+    }
+  }
+
+  Widget _buildStatusChip(String status) {
+    final color = _statusColor(status);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_statusIcon(status), size: 16, color: color),
+          const SizedBox(width: 5),
+          Text(
+            _statusLabel(status),
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
             ),
-            tooltip: 'Lembretes automáticos',
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: _loadAppointments,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Minha agenda',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Seus próximos atendimentos',
-                style: TextStyle(fontSize: 16, color: Colors.grey.shade600),
-              ),
-              const SizedBox(height: 24),
-              Expanded(
-                child: _loading
-                    ? const Center(child: CircularProgressIndicator())
-                    : _appointments.isEmpty
-                    ? _buildEmptyState()
-                    : ListView.separated(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        itemCount: _appointments.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          return _buildAppointmentCard(_appointments[index]);
-                        },
-                      ),
-              ),
-            ],
-          ),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const AppointmentFormScreen(),
-            ),
-          );
+    );
+  }
 
-          _loadAppointments();
-        },
-        icon: const Icon(Icons.add),
-        label: const Text('Novo atendimento'),
-      ),
+  Widget _buildFilterChip(String value, String label) {
+    final selected = _statusFilter == value;
+
+    return FilterChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) {
+        setState(() {
+          _statusFilter = value;
+        });
+      },
     );
   }
 
@@ -587,16 +406,38 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
 
     final phone = client?['phone']?.toString().trim() ?? '';
 
+    final status = appointment['status']?.toString() ?? 'pending';
+
     return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: Theme.of(context).dividerColor.withValues(alpha: 0.5),
+        ),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const CircleAvatar(child: Icon(Icons.person)),
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary
+                        .withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(
+                    Icons.person_outline,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -605,14 +446,17 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       Text(
                         clientName,
                         style: const TextStyle(
-                          fontSize: 18,
+                          fontSize: 17,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         serviceName,
-                        style: TextStyle(color: Colors.grey.shade600),
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 14,
+                        ),
                       ),
                     ],
                   ),
@@ -620,11 +464,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 Text(
                   _formatValue(value),
                   style: const TextStyle(
-                    fontSize: 16,
+                    fontSize: 15,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 PopupMenuButton<String>(
+                  padding: EdgeInsets.zero,
                   onSelected: (value) {
                     if (value == 'edit') {
                       _editAppointment(appointment);
@@ -661,40 +506,87 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 ),
               ],
             ),
-            const Divider(height: 24),
-            Row(
-              children: [
-                const Icon(Icons.calendar_today, size: 18),
-                const SizedBox(width: 8),
-                Text(
-                  _dateTitle(date),
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(width: 20),
-                const Icon(Icons.access_time, size: 18),
-                const SizedBox(width: 8),
-                Text(_formatTime(time)),
-              ],
+
+            const SizedBox(height: 16),
+
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest
+                    .withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.calendar_today_outlined,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _dateTitle(date),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(width: 18),
+                  Icon(
+                    Icons.access_time_outlined,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(_formatTime(time)),
+                  const Spacer(),
+                  _buildStatusChip(status),
+                ],
+              ),
             ),
+
             if (appointment['notes']?.toString().isNotEmpty == true) ...[
-              const SizedBox(height: 12),
-              Text(
-                appointment['notes'].toString(),
-                style: TextStyle(color: Colors.grey.shade700),
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.notes_outlined,
+                      size: 18,
+                      color: Colors.grey.shade600,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        appointment['notes'].toString(),
+                        style: TextStyle(
+                          color: Colors.grey.shade700,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
-            const SizedBox(height: 16),
+
+            const SizedBox(height: 14),
+
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
                 onPressed: phone.isEmpty
                     ? null
                     : () => _openWhatsApp(appointment),
-                icon: const Icon(Icons.chat),
+                icon: const Icon(Icons.chat_outlined),
                 label: Text(
                   phone.isEmpty
-                      ? 'WhatsApp sem telefone'
-                      : 'Enviar lembrete no WhatsApp',
+                      ? 'Cliente sem telefone'
+                      : 'Enviar lembrete pelo WhatsApp',
                 ),
               ),
             ),
@@ -705,22 +597,165 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   }
 
   Widget _buildEmptyState() {
+    final hasFilters = _searchText.isNotEmpty || _statusFilter != 'all';
+
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.calendar_today, size: 72, color: Colors.grey.shade400),
-          const SizedBox(height: 16),
-          Text(
-            'Nenhum atendimento cadastrado',
-            style: TextStyle(fontSize: 18, color: Colors.grey.shade600),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Adicione seu primeiro atendimento.',
-            style: TextStyle(color: Colors.grey.shade500),
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary
+                    .withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                hasFilters ? Icons.search_off : Icons.calendar_month_outlined,
+                size: 40,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              hasFilters
+                  ? 'Nenhum atendimento encontrado'
+                  : 'Nenhum atendimento cadastrado',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              hasFilters
+                  ? 'Tente alterar a busca ou o filtro.'
+                  : 'Adicione seu primeiro atendimento.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filteredAppointments = _filteredAppointments;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Agenda',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        actions: [
+          IconButton(
+            onPressed: _loading ? null : _loadAppointments,
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Atualizar',
           ),
         ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _loadAppointments,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+                children: [
+                  const Text(
+                    'Minha agenda',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  Text(
+                    'Organize seus próximos atendimentos.',
+                    style: TextStyle(fontSize: 15, color: Colors.grey.shade600),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  TextField(
+                    onChanged: (value) {
+                      setState(() {
+                        _searchText = value;
+                      });
+                    },
+                    decoration: InputDecoration(
+                      hintText: 'Buscar cliente ou serviço...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _searchText.isNotEmpty
+                          ? IconButton(
+                              onPressed: () {
+                                setState(() {
+                                  _searchText = '';
+                                });
+                              },
+                              icon: const Icon(Icons.clear),
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: Theme.of(context)
+                          .colorScheme
+                          .surfaceContainerHighest
+                          .withValues(alpha: 0.45),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        _buildFilterChip('all', 'Todos'),
+                        const SizedBox(width: 8),
+                        _buildFilterChip('pending', 'Pendentes'),
+                        const SizedBox(width: 8),
+                        _buildFilterChip('paid', 'Recebidos'),
+                        const SizedBox(width: 8),
+                        _buildFilterChip('cancelled', 'Cancelados'),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  if (filteredAppointments.isEmpty)
+                    SizedBox(height: 420, child: _buildEmptyState())
+                  else
+                    ...filteredAppointments.map(
+                      (appointment) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _buildAppointmentCard(appointment),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const AppointmentFormScreen(),
+            ),
+          );
+
+          _loadAppointments();
+        },
+        icon: const Icon(Icons.add),
+        label: const Text('Novo atendimento'),
       ),
     );
   }
